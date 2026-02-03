@@ -1,0 +1,6 @@
+requests
+pywebview
+google-genai
+psutil
+Pillow
+zstandard

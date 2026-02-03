@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# VS Code
+.vscode/
+
+# Project Specific (Local Data)
+data/
+map_gen.log
+coords_map.txt
+header_full.txt
+*.region.bin
+
+# OS files
+.DS_Store
+Thumbs.db
