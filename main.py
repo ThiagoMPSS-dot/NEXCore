@@ -311,12 +311,20 @@ def start_server(port, root_dir):
     httpd = HTTPServer(('127.0.0.1', port), Handler)
     httpd.serve_forever()
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
 def start_app():
     api = Api()
     
-    # Setup Paths
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    web_dir = os.path.join(base_dir, 'web')
+    # Setup Paths (PyInstaller compatible)
+    web_dir = resource_path('web')
     
     # Start Server
     port = find_free_port()

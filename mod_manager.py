@@ -44,7 +44,9 @@ class ModManager:
         self.modpacks_file = os.path.join(self.data_dir, "modpacks.json")
         self.config_file = os.path.join(self.data_dir, "config.json")
         
-        for d in [self.data_dir, self.library_dir, self.packs_dir]:
+        self.temp_backups_dir = os.path.join(self.data_dir, "temp_backups")
+        
+        for d in [self.data_dir, self.library_dir, self.packs_dir, self.temp_backups_dir]:
             if not os.path.exists(d):
                 os.makedirs(d)
         
@@ -284,10 +286,11 @@ class ModManager:
                     
                     # Cleanup
                     print("DEBUG: Cleanup started")
-                    if status_callback: status_callback("finished")
                     if active_pack:
-                        self.cleanup_after_game(active_pack)
+                        self.cleanup_after_game(active_pack, callback=status_callback)
+                    
                     self.is_launching = False
+                    if status_callback: status_callback("finished")
                     print("DEBUG: Monitor finished")
                     
                 except Exception as e:
@@ -338,7 +341,7 @@ class ModManager:
         except Exception as e:
             return f"Erro ao ler log: {e}"
 
-    def cleanup_after_game(self, pack_name):
+    def cleanup_after_game(self, pack_name, callback=None):
         """Syncs saves back to modpack cache and clears game directory"""
         if not pack_name: return
 
@@ -352,6 +355,7 @@ class ModManager:
 
             # 1. Sync Saves BACK to Modpack Cache (Progress Persistence)
             if self.config.get("manage_saves") and os.path.exists(game_saves_dir):
+                if callback: callback("Sincronizando mundos (NEXCore -> Cache)...")
                 pack_dir = os.path.join(self.packs_dir, pack_name)
                 pack_saves_dir = os.path.join(pack_dir, "saves")
                 
@@ -368,6 +372,7 @@ class ModManager:
                     print(f"Error syncing saves back: {e}")
 
             # 2. Delete Mods from Game Folder (Non-destructive)
+            if callback: callback("Limpando arquivos temporários...")
             try:
                 if os.path.exists(game_mods_dir):
                     self._clear_directory(game_mods_dir)
@@ -383,6 +388,63 @@ class ModManager:
                         print("Game Saves folder cleared.")
                 except Exception as e:
                     print(f"Error clearing saves: {e}")
+
+            # 4. Restore Original Game State (Pre-NEXCore Files)
+            self._restore_original_game_state(game_mods_dir, game_saves_dir, callback=callback)
+
+    def _backup_current_game_state(self, mods_dir, saves_dir, callback=None):
+        """Backs up existing mods/saves from game folder to temp storage"""
+        if callback: callback("Criando backup de segurança dos seus arquivos...")
+        print("Iniciando backup temporário dos arquivos do jogo...")
+        self._clear_directory(self.temp_backups_dir)
+        
+        try:
+            # Backup Mods
+            if os.path.exists(mods_dir) and os.listdir(mods_dir):
+                dst = os.path.join(self.temp_backups_dir, "Mods")
+                shutil.copytree(mods_dir, dst)
+                print("Mods originais salvos em backup temporário.")
+                
+            # Backup Saves
+            if os.path.exists(saves_dir) and os.listdir(saves_dir):
+                dst = os.path.join(self.temp_backups_dir, "Saves")
+                shutil.copytree(saves_dir, dst)
+                print("Saves originais salvos em backup temporário.")
+        except Exception as e:
+            print(f"Erro ao criar backup temporário: {e}")
+
+    def _restore_original_game_state(self, mods_dir, saves_dir, callback=None):
+        """Restores files from temp storage back to game folder"""
+        if callback: callback("Restaurando seus arquivos originais...")
+        print("Restaurando arquivos originais do usuário...")
+        
+        try:
+            # Restore Mods
+            src_mods = os.path.join(self.temp_backups_dir, "Mods")
+            if os.path.exists(src_mods):
+                if not os.path.exists(mods_dir): os.makedirs(mods_dir)
+                for item in os.listdir(src_mods):
+                    s = os.path.join(src_mods, item)
+                    d = os.path.join(mods_dir, item)
+                    if os.path.isdir(s): shutil.copytree(s, d)
+                    else: shutil.copy2(s, d)
+                print("Mods originais restaurados.")
+
+            # Restore Saves
+            src_saves = os.path.join(self.temp_backups_dir, "Saves")
+            if os.path.exists(src_saves):
+                if not os.path.exists(saves_dir): os.makedirs(saves_dir)
+                for item in os.listdir(src_saves):
+                    s = os.path.join(src_saves, item)
+                    d = os.path.join(saves_dir, item)
+                    if os.path.isdir(s): shutil.copytree(s, d)
+                    else: shutil.copy2(s, d)
+                print("Saves originais restaurados.")
+                
+            # Clear temp after restore
+            self._clear_directory(self.temp_backups_dir)
+        except Exception as e:
+            print(f"Erro ao restaurar arquivos originais: {e}")
 
     # --- API & Search ---
     def search_mods(self, query="", sort_field=1, sort_order="desc", offset=0):
@@ -1127,6 +1189,9 @@ class ModManager:
         game_mods_dir = os.path.join(game_dir, "UserData", "Mods")
         game_saves_dir = self._get_saves_dir(game_dir)
 
+        # 0. Backup current state before anything
+        self._backup_current_game_state(game_mods_dir, game_saves_dir, callback=callback)
+
         # 1. Clear & Deploy Mods (Non-destructive)
         if callback: callback("Limpando pasta de mods...")
         if not os.path.exists(game_mods_dir): os.makedirs(game_mods_dir)
@@ -1530,8 +1595,16 @@ class ModManager:
         else:
             logger.warning(f"Palette file not found at {palette_path}")
 
-        import re
-        block_pattern = re.compile(rb'([A-Z][a-zA-Z]+(?:_[a-zA-Z]+)*)')
+        # Pre-compute encoded palette keys for faster lookup
+        # Hytale uses Title_Case in NBT (Rock_Bedrock, Ore_Iron_Basalt)
+        # but palette has lowercase keys. We need both versions.
+        palette_keys_encoded = {}
+        for k in palette.keys():
+            # Add lowercase version
+            palette_keys_encoded[k] = k.encode('utf-8')
+            # Add Title_Case version (capitalize each part after _)
+            title_case = '_'.join(word.capitalize() for word in k.split('_'))
+            palette_keys_encoded[k + '_title'] = title_case.encode('utf-8')
 
         for rx, rz, rf_path in valid_regions:
             logger.debug(f"Processing region {rx}.{rz}...")
@@ -1554,11 +1627,18 @@ class ModManager:
                     rg_off_x = (rx - min_x) * (32 // scale)
                     rg_off_z = (rz - min_z) * (32 // scale)
 
-                    # Block priorities for "Top-Down" view
+                    # Block priorities for "Top-Down" view (higher = more visible)
                     PRIORITIES = {
-                        "water": 100, "lava": 99, "snow": 90, "grass": 80,
-                        "sand": 70, "leaves": 60, "oak_log": 55, "log": 50,
-                        "dirt": 30, "stone": 10, "bedrock": 1
+                        "water": 100, "lava": 99, "snow": 90,
+                        "grass": 85, "vegetation": 84, "flower": 83,
+                        "sand": 75, "gravel": 74,
+                        "leaves": 65, "tree": 64,
+                        "log": 55, "wood": 54,
+                        "ore": 45,
+                        "dirt": 35, "soil": 34,
+                        "clay": 25,
+                        "rock": 15, "stone": 12, "volcanic": 11,
+                        "bedrock": 1
                     }
 
                     for grid_idx, block_idx in enumerate(chunk_offsets):
@@ -1581,37 +1661,32 @@ class ModManager:
                             with dctx.stream_reader(io.BytesIO(content[byte_off:])) as reader:
                                 cdata = reader.read(65536)
                                 
-                                matches = block_pattern.findall(cdata)
+                                # NOVA ABORDAGEM: Buscar diretamente por nomes da paleta
                                 best_color = None
                                 best_priority = -1
-                                found_count = 0
                                 match_count = 0
+                                matched_blocks = []
                                 
-                                for m in matches:
-                                    found_count += 1
-                                    s = m.decode('utf-8', errors='ignore').lower()
-                                    
-                                    # Try to find a match in the palette
-                                    matched_key = None
-                                    if s in palette:
-                                        matched_key = s
-                                    else:
-                                        # Hytale ID format: Category_Name (e.g. Rock_Stone)
-                                        # Palette key might be just "Stone" or full "Rock_Stone"
-                                        for k in palette:
-                                            if k in s: # If "stone" is in "rock_stone"
-                                                matched_key = k
-                                                break
-                                    
-                                    if matched_key:
+                                # Procurar cada nome de bloco da paleta no chunk
+                                for key_name, encoded_key in palette_keys_encoded.items():
+                                    if encoded_key in cdata:
+                                        # Remove suffix '_title' se presente
+                                        palette_key = key_name.replace('_title', '') if '_title' in key_name else key_name
+                                        
+                                        # Evitar contar duplicatas (lowercase + Title_Case do mesmo bloco)
+                                        if palette_key in matched_blocks:
+                                            continue
+                                        matched_blocks.append(palette_key)
+                                        
                                         match_count += 1
-                                        color_val = palette[matched_key]
+                                        color_val = palette[palette_key]
+                                        
                                         if best_color is None:
                                             best_color = color_val
                                             
                                         priority = 20
                                         for key, p_val in PRIORITIES.items():
-                                            if key in matched_key:
+                                            if key in palette_key:
                                                 priority = p_val
                                                 break
                                         
@@ -1619,43 +1694,31 @@ class ModManager:
                                             best_priority = priority
                                             best_color = color_val
                                 
-                                color = best_color if best_color else (30, 30, 35)
-                                if best_color is None and found_count > 0:
-                                    # Samples of what was found but not matched
-                                    samples = [m.decode('utf-8', errors='ignore') for m in matches[:5]]
-                                    # Only log once per region to avoid bloat
-                                    if grid_idx % 100 == 0:
-                                        logger.debug(f"Chunk {grid_idx} (Region {rx}.{rz}): Found {found_count} strings, but 0 in palette. Examples: {samples}")
-
-                                # Dynamic Mapping: Try to find coordinates in NBT-like data
-                                mx = re.search(rb'absX', cdata)
-                                mz = re.search(rb'absZ', cdata)
+                                # Fallback: Se nenhum bloco foi encontrado, usar cinza médio
+                                # (chunks vazios/subterrâneos ou blocos não mapeados)
+                                color = best_color if best_color else (60, 60, 65)
                                 
-                                x, z = None, None
-                                if mx and mz:
-                                    try:
-                                        # Type 3 (Int) + Big Endian Int32
-                                        x = struct.unpack('>i', cdata[mx.end()+1 : mx.end()+5])[0]
-                                        z = struct.unpack('>i', cdata[mz.end()+1 : mz.end()+5])[0]
-                                    except: pass
+                                # Debug logging para primeiros chunks
+                                if grid_idx % 100 == 0 and grid_idx > 0:
+                                    logger.debug(f"Chunk {grid_idx} (Region {rx}.{rz}): Found {match_count} blocks in palette")
 
-                                if x is not None and z is not None:
-                                    # Use absolute coordinates
-                                    px = (x - min_x * 32) // scale
-                                    pz = (z - min_z * 32) // scale
-                                else:
-                                    # Fallback: Column-Major
-                                    cz = grid_idx % 32
-                                    cx = grid_idx // 32
-                                    px = rg_off_x + cx
-                                    pz = rg_off_z + cz
+                                # Use grid index to calculate relative position within region
+                                # grid_idx is the chunk index within the 32x32 region grid (0-1023)
+                                # Row-major ordering: first 32 chunks are row 0, next 32 are row 1, etc.
+                                local_x = grid_idx % 32   # X position within region (0-31)
+                                local_z = grid_idx // 32  # Z (row) position within region (0-31)
+                                
+                                # Add region offset and scale
+                                px = rg_off_x + (local_x // scale)
+                                pz = rg_off_z + (local_z // scale)
 
+                                # Bounds check
                                 if 0 <= px < width_chunks and 0 <= pz < height_chunks:
                                     # Ensure color is a tuple of 3 ints
                                     if isinstance(color, (list, tuple)) and len(color) >= 3:
                                         pixels[px, pz] = tuple(int(c) for c in color[:3])
                                     else:
-                                        pixels[px, pz] = (30, 30, 35)
+                                        pixels[px, pz] = (60, 60, 65)
                         except Exception as e:
                             if grid_idx == 0: # Only log first error to avoid massive logs if decompression fails
                                 logger.error(f"Decompression error in chunk {grid_idx} of region {rx}.{rz}: {e}")

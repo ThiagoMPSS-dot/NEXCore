@@ -50,8 +50,6 @@ body {
 .logo-icon {
     width: 32px;
     height: 32px;
-    background: var(--gradient-btn);
-    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -565,6 +563,7 @@ body {
         transform: rotate(360deg);
     }
 }
+
 /* Update Banner */
 .update-banner {
     background: linear-gradient(to right, #1e1b4b, #312e81);
