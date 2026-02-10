@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / Build
+dist/
+build/
+*.spec
+
+# Log files
+*.log
+map_gen.log
+
+# Databases
+*.db
+
+# Temporary backups
+data/temp_backups/
+
+# OS files
+.DS_Store
+Thumbs.db
