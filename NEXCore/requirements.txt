@@ -1,0 +1,9 @@
+requests
+pywebview
+google-genai
+psutil
+Pillow
+zstandard
+beautifulsoup4
+deep-translator
+pyinstaller
