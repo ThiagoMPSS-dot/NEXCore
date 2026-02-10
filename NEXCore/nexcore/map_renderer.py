@@ -212,7 +212,9 @@ class MapRenderer:
                     try:
                         f.seek(b_idx * 4096 + 40); decomp = dctx.decompress(f.read(1024*256), max_output_size=1048576)
                         if self._render_chunk_brute(decomp, pxs, world_palette, l_pal, o_idx%32, o_idx//32, meta_palette): rendered_count += 1
-                    except: continue
+                    except Exception as e:
+                        logger.error(f"Erro ao renderizar chunk {o_idx}: {e}")
+                        continue
         except Exception as e: logger.error(f"Region error: {e}")
 
         c_dir = os.path.join(save_path, "map_cache"); os.makedirs(c_dir, exist_ok=True)

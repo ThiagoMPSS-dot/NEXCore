@@ -99,9 +99,38 @@ class Launcher:
                                 shutil.copytree(game_folder, nexcore_folder)
         except: pass
 
+    def _safe_remove(self, path):
+        """Removes a file, directory or link safely"""
+        if not os.path.exists(path) and not os.path.islink(path):
+            return
+        try:
+            if os.path.islink(path) or os.path.isfile(path):
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+        except Exception as e:
+            print(f"Error removing {path}: {e}")
+
+    def _link_or_copy(self, src, dst, is_dir=False):
+        """Tries to create a symlink, falls back to copy if fails"""
+        self._safe_remove(dst)
+        try:
+            # No Windows, Junctions são mais seguras se não for admin
+            # O Python os.symlink lida com isso se target_is_directory=True
+            os.symlink(src, dst, target_is_directory=is_dir)
+            return "link"
+        except Exception as e:
+            print(f"Symlink failed, falling back to copy: {e}")
+            if is_dir:
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            return "copy"
+
     def sync_modpack_to_game(self, callback=None):
         game_dir = self.storage.config.get("game_dir")
         pack_name = self.storage.config.get("active_modpack")
+        use_symlinks = self.storage.config.get("use_symlinks", True)
         
         if not game_dir or not os.path.exists(game_dir):
             return {"status": "error", "message": "Diretório do jogo inválido."}
@@ -113,13 +142,18 @@ class Launcher:
 
         self._backup_current_game_state(game_mods_dir, game_saves_dir, callback=callback)
 
-        if callback: callback("Limpando pasta de mods...")
+        if callback: callback("Preparando pasta de mods...")
         if not os.path.exists(game_mods_dir): os.makedirs(game_mods_dir)
-        self._clear_directory(game_mods_dir)
-
+        
+        # Se for usar link simbólico na pasta inteira (mais rápido)
+        # Originalmente o sistema limpava a pasta e copiava um por um.
+        # Vamos manter a flexibilidade.
+        
         packs = self.storage.load_modpacks()
         target_pack = next((p for p in packs if p['name'] == pack_name), None)
         if not target_pack: return {"status": "error", "message": "Pack config gone"}
+
+        self._clear_directory(game_mods_dir)
 
         errors = []
         mods_list = target_pack.get('mods', [])
@@ -128,7 +162,6 @@ class Launcher:
         for i, mod_id in enumerate(mods_list):
             if callback: callback(f"Sincronizando mod {i+1}/{total_mods}...")
             
-            # Use API Client to ensure mod is in library
             res = self.api_client.install_mod_to_library(mod_id)
             if res['status'] == 'success' or res['status'] == 'manual_required':
                  f_name = res.get('file_name')
@@ -136,16 +169,19 @@ class Launcher:
                  
                  src = os.path.join(self.storage.library_dir, f_name)
                  dst = os.path.join(game_mods_dir, f_name)
+                 
                  if os.path.exists(src):
                     if f_name.endswith('.zip'):
+                        # Zips precisam ser extraídos, não linkados (geralmente)
                         extract_to = os.path.join(game_mods_dir, os.path.splitext(f_name)[0])
-                        if os.path.exists(extract_to):
-                            if os.path.isdir(extract_to): shutil.rmtree(extract_to)
-                            else: os.remove(extract_to)
+                        self._safe_remove(extract_to)
                         with zipfile.ZipFile(src, 'r') as z:
                             z.extractall(extract_to)
                     else:
-                        shutil.copy2(src, dst)
+                        if use_symlinks:
+                            self._link_or_copy(src, dst, is_dir=False)
+                        else:
+                            shutil.copy2(src, dst)
             else:
                 errors.append(f"Mod {mod_id} missing")
 
@@ -160,7 +196,10 @@ class Launcher:
                     if item.lower() in ('logs', 'backups', 'backup'): continue
                     s = os.path.join(target_saves, item)
                     d = os.path.join(game_saves_dir, item)
-                    if os.path.isdir(s):
+                    
+                    if use_symlinks and os.path.isdir(s):
+                        self._link_or_copy(s, d, is_dir=True)
+                    elif os.path.isdir(s):
                         self._copytree_with_filter(s, d, ignore_folders=True)
                     else:
                         shutil.copy2(s, d)

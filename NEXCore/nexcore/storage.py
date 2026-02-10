@@ -45,7 +45,8 @@ class StorageManager:
             "api_key": "",
             "game_dir": "",
             "manage_saves": False,
-            "active_modpack": None
+            "active_modpack": None,
+            "use_symlinks": True
         }
         if os.path.exists(self.config_file):
             try:
