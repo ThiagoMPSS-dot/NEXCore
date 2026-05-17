@@ -119,11 +119,20 @@ window.addEventListener('pywebviewready', async () => {
         document.getElementById('game-dir-input').value = config.game_dir || '';
         document.getElementById('manage-saves-input').checked = config.manage_saves || false;
 
+        // AI Provider
+        if (config.ai_provider) document.getElementById('ai-provider-select').value = config.ai_provider;
+        toggleAiProvider();
+
         // Gemini
         document.getElementById('gemini-key-input').value = config.gemini_api_key || '';
         if (config.gemini_model) document.getElementById('gemini-model-select').value = config.gemini_model;
 
-        // Translation (New)
+        // OpenAI
+        document.getElementById('openai-key-input').value = config.openai_api_key || '';
+        if (config.openai_model) document.getElementById('openai-model-input').value = config.openai_model;
+        if (config.openai_base_url) document.getElementById('openai-base-url-input').value = config.openai_base_url;
+
+        // Translation
         if (config.translation_lang) document.getElementById('setting-trans-lang').value = config.translation_lang;
         if (config.auto_translate !== undefined) document.getElementById('setting-trans-auto').checked = config.auto_translate;
 
@@ -1042,24 +1051,6 @@ async function activatePack(name) {
     }
 }
 
-async function saveSettings() {
-    const key = document.getElementById('api-key-input').value;
-    const dir = document.getElementById('game-dir-input').value;
-    const saves = document.getElementById('manage-saves-input').checked;
-
-    const geminiKey = document.getElementById('gemini-key-input').value;
-    const geminiModel = document.getElementById('gemini-model-select').value;
-
-    await window.pywebview.api.save_config_py({
-        api_key: key,
-        game_dir: dir,
-        manage_saves: saves,
-        gemini_api_key: geminiKey,
-        gemini_model: geminiModel
-    });
-    await alertApp("Salvo!");
-}
-
 async function loadScreenshots() {
     const grid = document.getElementById('screenshots-grid');
     grid.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
@@ -1273,19 +1264,31 @@ async function runDiscovery() {
     // Let's just prepend.
 
     try {
-        const mods = await window.pywebview.api.get_recommendations_py(pref);
+        const result = await window.pywebview.api.get_recommendations_py(pref);
 
-        if (mods.error) {
-            recGrid.innerHTML = `Erro: ${mods.error}`;
+        if (!result) {
+            recGrid.innerHTML = 'Erro: Resposta vazia do servidor.';
+            return;
+        }
+        if (result.error) {
+            recGrid.innerHTML = `Erro: ${result.error}`;
             return;
         }
 
-        if (mods.length === 0) {
+        const mods = result.data;
+        if (!mods || mods.length === 0) {
             recGrid.innerHTML = '<div style="padding:10px">Nenhuma recomendação encontrada para este termo. Tente outro!</div>';
             return;
         }
 
-        recGrid.innerHTML = '';
+        let headerHtml = '';
+        if (result.ai_used && result.search_term) {
+            headerHtml = `<div style="color:#a78bfa; margin-bottom:15px; font-size:0.9rem">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> IA usou o termo: "<strong>${result.search_term}</strong>"
+            </div>`;
+        }
+
+        recGrid.innerHTML = headerHtml;
         mods.forEach(mod => {
             const thumb = mod.logo?.url || 'assets/placeholder.png';
             const card = document.createElement('div');
@@ -1298,9 +1301,9 @@ async function runDiscovery() {
 
             card.innerHTML = `
                 <div class="card-image" style="background-image: url('${thumb}'); cursor:pointer" onclick="openModDetails(${mod.id})">
-                    <div style="position:absolute; top:10px; right:10px; background:#a78bfa; color:white; padding:4px 8px; border-radius:4px; font-size:0.7rem; font-weight:bold">
+                    ${result.ai_used ? `<div style="position:absolute; top:10px; right:10px; background:#a78bfa; color:white; padding:4px 8px; border-radius:4px; font-size:0.7rem; font-weight:bold">
                         <i class="fa-solid fa-star"></i> AI PICK
-                    </div>
+                    </div>` : ''}
                 </div>
                 <div class="card-content">
                     <div class="card-title-row">
@@ -1474,14 +1477,24 @@ window.updatePlayButtonState = function (status) {
     }
 };
 
+function toggleAiProvider() {
+    const provider = document.getElementById('ai-provider-select').value;
+    document.getElementById('gemini-settings').style.display = provider === 'gemini' ? 'block' : 'none';
+    document.getElementById('openai-settings').style.display = provider === 'openai' ? 'block' : 'none';
+}
+
 async function saveSettings() {
     const config = {
         api_key: document.getElementById('api-key-input').value,
         game_dir: document.getElementById('game-dir-input').value,
         manage_saves: document.getElementById('manage-saves-input').checked,
 
+        ai_provider: document.getElementById('ai-provider-select').value,
         gemini_api_key: document.getElementById('gemini-key-input').value,
         gemini_model: document.getElementById('gemini-model-select').value,
+        openai_api_key: document.getElementById('openai-key-input').value,
+        openai_model: document.getElementById('openai-model-input').value,
+        openai_base_url: document.getElementById('openai-base-url-input').value,
 
         translation_lang: document.getElementById('setting-trans-lang').value,
         auto_translate: document.getElementById('setting-trans-auto').checked

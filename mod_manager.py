@@ -45,6 +45,7 @@ class ModManager:
         self.config_file = os.path.join(self.data_dir, "config.json")
         
         self.temp_backups_dir = os.path.join(self.data_dir, "temp_backups")
+        self.verbose = False
         
         for d in [self.data_dir, self.library_dir, self.packs_dir, self.temp_backups_dir]:
             if not os.path.exists(d):
@@ -81,7 +82,15 @@ class ModManager:
             "api_key": "",
             "game_dir": "",
             "manage_saves": False,
-            "active_modpack": None
+            "active_modpack": None,
+            "gemini_api_key": "",
+            "gemini_model": "gemini-2.0-flash",
+            "ai_provider": "gemini",
+            "openai_api_key": "",
+            "openai_model": "gpt-4o-mini",
+            "openai_base_url": "https://api.openai.com/v1",
+            "translation_lang": "pt",
+            "auto_translate": False
         }
         if os.path.exists(self.config_file):
             with open(self.config_file, 'r') as f:
@@ -95,6 +104,49 @@ class ModManager:
         with open(self.config_file, 'w') as f:
             json.dump(self.config, f)
         return {"status": "success"}
+
+    # --- Logging ---
+
+    def _log(self, msg, debug=False):
+        if debug and not self.verbose:
+            return
+        print(msg)
+
+    # --- AI Provider Abstraction ---
+
+    def _call_gemini(self, prompt):
+        key = self.config.get("gemini_api_key")
+        model = self.config.get("gemini_model", "gemini-2.0-flash")
+        from google import genai
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(model=model, contents=prompt)
+        return response.text.strip()
+
+    def _call_openai(self, prompt, system_prompt=None):
+        key = self.config.get("openai_api_key")
+        model = self.config.get("openai_model", "gpt-4o-mini")
+        base_url = self.config.get("openai_base_url", "https://api.openai.com/v1")
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        resp = requests.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers=headers,
+            json={"model": model, "messages": messages, "temperature": 0.3},
+            timeout=30
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
+    def _call_ai(self, prompt, system_prompt=None):
+        provider = self.config.get("ai_provider", "gemini")
+        if provider == "openai":
+            return self._call_openai(prompt, system_prompt)
+        return self._call_gemini(prompt)
 
     def _extract_internal_id(self, file_path):
         """Extracts Namespace:Name from manifest.json inside mod zip/jar"""
@@ -250,14 +302,14 @@ class ModManager:
             
             # Monitor in background
             def monitor():
-                print("DEBUG: Monitor thread started")
+                self._log("DEBUG: Monitor thread started", debug=True)
                 try:
                     # Capture output in real-time
                     if console_callback:
                         for line in iter(proc.stdout.readline, ""):
                             console_callback(line.strip())
                     
-                    print("DEBUG: Waiting for launcher process")
+                    self._log("DEBUG: Waiting for launcher process", debug=True)
                     proc.wait()
                     print("Launcher/Bridge closed. Checking for HytaleClient...")
                     
@@ -285,13 +337,13 @@ class ModManager:
                         print("Game client not detected within timeout.")
                     
                     # Cleanup
-                    print("DEBUG: Cleanup started")
+                    self._log("DEBUG: Cleanup started", debug=True)
                     if active_pack:
                         self.cleanup_after_game(active_pack, callback=status_callback)
                     
                     self.is_launching = False
                     if status_callback: status_callback("finished")
-                    print("DEBUG: Monitor finished")
+                    self._log("DEBUG: Monitor finished", debug=True)
                     
                 except Exception as e:
                     print(f"Monitoring error: {e}")
@@ -482,35 +534,41 @@ class ModManager:
 
         search_term = preference if preference else ""
 
-        # --- Gemini Integration ---
-        gemini_key = config.get("gemini_api_key")
-        if gemini_key and preference:
+        # --- AI Discovery (Gemini / OpenAI) ---
+        ai_provider = config.get("ai_provider", "gemini")
+        ai_used = False
+        if ai_provider == "openai":
+            use_ai = bool(preference)
+        else:
+            use_ai = bool(config.get("gemini_api_key") and preference)
+        if use_ai:
             try:
-                from google import genai
-                client = genai.Client(api_key=gemini_key)
-                
-                model_name = config.get("gemini_model", "gemini-1.5-flash")
-                
                 prompt = f"Translate this mod preference into a single English keyword or very short phrase (max 2 words) for searching a Minecraft mod database. Return ONLY the keyword, nothing else. Preference: '{preference}'"
-                
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                ai_term = response.text.strip()
-                print(f"[AI Discovery] Gemini translated '{preference}' -> '{ai_term}'")
+                ai_term = self._call_ai(prompt)
+                print(f"[AI Discovery] {ai_provider} translated '{preference}' -> '{ai_term}'")
                 search_term = ai_term
+                ai_used = True
             except Exception as e:
-                print(f"[AI Discovery] Gemini Error: {e}")
-                # Fallback to original preference
+                print(f"[AI Discovery] {ai_provider} Error: {e}")
         
-        params = {
-            'gameId': self.game_id,
-            'searchFilter': search_term,
-            'sortField': 2, # Popularity
-            'sortOrder': 'desc',
-            'pageSize': 50 
-        }
+        try:
+            resp = requests.get(f"{self.base_url}/mods/search", headers=self.get_headers(), params={
+                'gameId': self.game_id,
+                'searchFilter': search_term,
+                'sortField': 2,
+                'sortOrder': 'desc',
+                'pageSize': 50
+            })
+            if resp.status_code == 200:
+                data = resp.json().get('data', [])
+                return {
+                    "data": self._inject_install_status(data),
+                    "search_term": search_term,
+                    "ai_used": ai_used
+                }
+            return {"error": resp.text}
+        except Exception as e:
+            return {"error": str(e)}
 
     def export_modpack_cf(self, pack_name, target_path=None, progress_callback=None):
         """Exports a modpack in CurseForge format (manifest.json + overrides)"""
@@ -806,15 +864,14 @@ class ModManager:
     def translate_html(self, html_content, target_lang="pt", callback=None):
         if not html_content: return ""
         
-        # 1. Gemini Strategy (Best for preserving context and HTML structure)
-        gemini_key = self.config.get("gemini_api_key")
-        if gemini_key:
+        # 1. AI Provider (Gemini / OpenAI — best for preserving HTML structure)
+        ai_provider = self.config.get("ai_provider", "gemini")
+        if ai_provider == "openai":
+            use_translation_ai = True
+        else:
+            use_translation_ai = bool(self.config.get("gemini_api_key"))
+        if use_translation_ai:
             try:
-                from google import genai
-                client = genai.Client(api_key=gemini_key)
-                model_name = self.config.get("gemini_model", "gemini-1.5-flash")
-                
-                # Optimized prompt for HTML translation
                 prompt = (
                     f"Translate the following HTML content to the language '{target_lang}'. "
                     "IMPORTANT: Preserve all HTML tags, attributes, and structure EXACTLY. "
@@ -823,24 +880,15 @@ class ModManager:
                     "Just return the raw translated HTML.\n\n"
                     f"{html_content}"
                 )
-                
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                
-                # Cleanup if model adds markdown blocks
-                text = response.text.strip()
+                text = self._call_ai(prompt)
                 if text.startswith("```html"): text = text[7:]
                 if text.startswith("```"): text = text[3:]
                 if text.endswith("```"): text = text[:-3]
-                
                 translated_final = text.strip()
                 if callback: callback(translated_final)
                 return translated_final
             except Exception as e:
-                print(f"Gemini Translation Error: {e}")
-                # Fallback to free translator
+                print(f"{ai_provider} Translation Error: {e}")
         
         # 2. Free Translator Strategy (Deep Translator + BeautifulSoup)
         try:

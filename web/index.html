@@ -326,24 +326,57 @@
                 </div>
 
                 <div style="margin-bottom: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
-                    <h3 style="color: #a78bfa; margin-bottom: 15px;"><i class="fa-solid fa-robot"></i> Gemini AI
+                    <h3 style="color: #a78bfa; margin-bottom: 15px;"><i class="fa-solid fa-robot"></i> AI
                         Configuration</h3>
 
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Gemini API Key</label>
-                    <input type="password" id="gemini-key-input" class="search-input"
-                        placeholder="Chave do Google AI Studio">
-                    <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px; margin-bottom: 15px;">
-                        Para uso do AI Discovery Engine. Obtenha em aistudio.google.com
-                    </p>
-
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Modelo Gemini</label>
-                    <select id="gemini-model-select" class="search-input"
-                        style="background: var(--bg-input); color: white;">
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Mais Rápido)</option>
-                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (Mais Inteligente)</option>
-                        <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B</option>
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Provedor de IA</label>
+                    <select id="ai-provider-select" class="search-input"
+                        style="background: var(--bg-input); color: white; margin-bottom: 15px;"
+                        onchange="toggleAiProvider()">
+                        <option value="gemini">Gemini (Google)</option>
+                        <option value="openai">OpenAI / Compatível</option>
                     </select>
+
+                    <div id="gemini-settings">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Gemini API Key</label>
+                        <input type="password" id="gemini-key-input" class="search-input"
+                            placeholder="Chave do Google AI Studio">
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px; margin-bottom: 15px;">
+                            Para uso do AI Discovery Engine. Obtenha em aistudio.google.com
+                        </p>
+
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Modelo Gemini</label>
+                        <select id="gemini-model-select" class="search-input"
+                            style="background: var(--bg-input); color: white;">
+                            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Mais Rápido)</option>
+                            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Mais Inteligente)</option>
+                            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B</option>
+                        </select>
+                    </div>
+
+                    <div id="openai-settings" style="display: none;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">OpenAI API Key</label>
+                        <input type="password" id="openai-key-input" class="search-input"
+                            placeholder="Chave da API OpenAI">
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px; margin-bottom: 15px;">
+                            Para uso do AI Discovery Engine. Obtenha em platform.openai.com
+                        </p>
+
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Modelo</label>
+                        <input type="text" id="openai-model-input" class="search-input"
+                            placeholder="gpt-4o-mini">
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px; margin-bottom: 15px;">
+                            Modelo OpenAI compatível (gpt-4o-mini, gpt-4o, etc.)
+                        </p>
+
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Base URL</label>
+                        <input type="text" id="openai-base-url-input" class="search-input"
+                            placeholder="https://api.openai.com/v1">
+                        <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 8px;">
+                            URL base para endpoints compatíveis (OpenAI, Azure, Ollama, LocalAI, etc.)
+                        </p>
+                    </div>
                 </div>
 
                 <h3 style="margin-top:30px; border-bottom:1px solid var(--border-color); padding-bottom:10px">Tradução

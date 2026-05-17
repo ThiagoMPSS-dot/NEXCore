@@ -7,3 +7,7 @@ zstandard
 beautifulsoup4
 deep-translator
 pyinstaller
+pyqtwebengine
+PyQt5
+pywebview
+pywebview[qt]

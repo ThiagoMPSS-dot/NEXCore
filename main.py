@@ -320,8 +320,9 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
-def start_app():
+def start_app(verbose=False):
     api = Api()
+    api.manager.verbose = verbose
     
     # Setup Paths (PyInstaller compatible)
     web_dir = resource_path('web')
@@ -360,4 +361,9 @@ def start_app():
     webview.start(debug=False, icon=icon_path, gui=gui_backend)
 
 if __name__ == '__main__':
-    start_app()
+    import argparse
+    parser = argparse.ArgumentParser(description='NEXCore - Gerenciador de Mods Hytale')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Exibe logs detalhados no terminal')
+    args = parser.parse_args()
+    start_app(verbose=args.verbose)
